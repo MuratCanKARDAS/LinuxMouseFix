@@ -13,13 +13,16 @@ import os
 import logging
 
 # Setup logging
+config_dir = os.path.expanduser("~/.config/LinuxMouseFix")
+os.makedirs(config_dir, exist_ok=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     datefmt="%H:%M:%S",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler("/tmp/linuxmousefix.log", mode="w")
+        logging.FileHandler(os.path.join(config_dir, "app.log"), mode="w")
     ]
 )
 log = logging.getLogger("LinuxMouseFix")
