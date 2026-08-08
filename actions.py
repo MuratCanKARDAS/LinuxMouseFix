@@ -35,7 +35,7 @@ class ActionExecutor:
             except Exception as e:
                 log.error(f"Error executing {action_name}: {e}")
 
-    def _press_keys(self, *keys, delay=0.015):
+    def _press_keys(self, *keys, delay=0.05):
         if not self.ui:
             return
         
@@ -98,7 +98,8 @@ class ActionExecutor:
     # ─── Desktop / Mission Control / App Grid ────────────
 
     def _act_showDesktop(self):
-        self._press_keys(ecodes.KEY_LEFTMETA, ecodes.KEY_D)
+        # Use Ctrl+Super+D to avoid typing 'd' in the GNOME search bar
+        self._press_keys(ecodes.KEY_LEFTCTRL, ecodes.KEY_LEFTMETA, ecodes.KEY_D)
 
     def _act_missionControl(self):
         self._press_keys(ecodes.KEY_LEFTMETA)
