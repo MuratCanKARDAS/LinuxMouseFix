@@ -169,6 +169,9 @@ class MouseEngine(threading.Thread):
         self._device_info_callback = None
         self._listen_callback = None
 
+        self._inertia_thread = None
+        self._inertia_active = False
+
     @property
     def running(self):
         return self._running
@@ -298,6 +301,61 @@ class MouseEngine(threading.Thread):
         else:
             self._passthrough(ev)
 
+    def _stop_inertia(self):
+        self._inertia_active = False
+
+    def _start_inertia(self, vx, vy):
+        self._stop_inertia()
+        self._inertia_active = True
+
+        def inertia_loop():
+            curr_vx = vx * 0.35
+            curr_vy = vy * 0.35
+            accum_x = 0.0
+            accum_y = 0.0
+            friction = 0.90  # Decay factor per 15ms frame for smooth glide & stop
+
+            while self._inertia_active and self._running:
+                curr_vx *= friction
+                curr_vy *= friction
+
+                if abs(curr_vx) < 15 and abs(curr_vy) < 15:
+                    break
+
+                dt = 0.015
+                accum_x += curr_vx * dt
+                accum_y += curr_vy * dt
+
+                sens = max(1, config.pan_sensitivity)
+                inv = -1 if config.pan_invert else 1
+
+                if abs(accum_y) >= sens:
+                    steps = int(accum_y / sens)
+                    direction = -steps * inv
+                    if self._ui:
+                        self._ui.write(ecodes.EV_REL, ecodes.REL_WHEEL, direction)
+                        if hasattr(ecodes, 'REL_WHEEL_HI_RES'):
+                            self._ui.write(ecodes.EV_REL, ecodes.REL_WHEEL_HI_RES, direction * 120)
+                        self._ui.syn()
+                    accum_y -= steps * sens
+
+                if abs(accum_x) >= sens:
+                    steps = int(accum_x / sens)
+                    direction = steps * inv
+                    if self._ui:
+                        self._ui.write(ecodes.EV_REL, ecodes.REL_HWHEEL, direction)
+                        if hasattr(ecodes, 'REL_HWHEEL_HI_RES'):
+                            self._ui.write(ecodes.EV_REL, ecodes.REL_HWHEEL_HI_RES, direction * 120)
+                        self._ui.syn()
+                    accum_x -= steps * sens
+
+                time.sleep(dt)
+
+            self._inertia_active = False
+
+        self._inertia_thread = threading.Thread(target=inertia_loop, daemon=True)
+        self._inertia_thread.start()
+
     def _handle_button(self, ev):
         btn = BUTTON_MAP.get(ev.code, ev.code) # Fallback to ev.code for unknown buttons
         
@@ -323,6 +381,7 @@ class MouseEngine(threading.Thread):
             return
 
         if ev.value == 1:  # Press
+            self._stop_inertia()
             hold_timer = None
             hold_action = config.get_action(btn, "hold")
             if hold_action and hold_action not in ("none", "panScroll"):
@@ -334,6 +393,8 @@ class MouseEngine(threading.Thread):
             self._pressed_buttons[btn] = {
                 "dx": 0, "dy": 0,
                 "pan_x": 0, "pan_y": 0,
+                "vx": 0.0, "vy": 0.0,
+                "last_move_time": time.monotonic(),
                 "triggered": False,
                 "evcode": ev.code,
                 "last_trigger_time": 0,
@@ -344,6 +405,8 @@ class MouseEngine(threading.Thread):
                 self._pressed_buttons[btn] = {
                     "dx": 0, "dy": 0,
                     "pan_x": 0, "pan_y": 0,
+                    "vx": 0.0, "vy": 0.0,
+                    "last_move_time": time.monotonic(),
                     "triggered": False,
                     "evcode": ev.code,
                     "last_trigger_time": 0,
@@ -355,6 +418,19 @@ class MouseEngine(threading.Thread):
             if state:
                 if state.get("hold_timer"):
                     state["hold_timer"].cancel()
+
+                hold_action = config.get_action(btn, "hold")
+                is_pan = (
+                    hold_action == "panScroll" or
+                    any(r["button"] == btn and r["action"] == "panScroll" for r in config.remaps)
+                )
+
+                if state["triggered"] and is_pan:
+                    vx = state.get("vx", 0.0)
+                    vy = state.get("vy", 0.0)
+                    if abs(vx) > 30 or abs(vy) > 30:
+                        self._start_inertia(vx, vy)
+
                 if not state["triggered"]:
                     action = config.get_action(btn, "click")
                     if action and action != "none":
@@ -427,12 +503,21 @@ class MouseEngine(threading.Thread):
                 any(r["button"] == btn and r["action"] == "panScroll" for r in config.remaps)
             )
 
+            now = time.monotonic()
+            last_t = state.get("last_move_time", now)
+            dt = max(0.003, now - last_t)
+            state["last_move_time"] = now
+
             if ev.code == ecodes.REL_X:
                 state["dx"] += ev.value
                 state["pan_x"] += ev.value
+                inst_vx = ev.value / dt
+                state["vx"] = state.get("vx", 0.0) * 0.4 + inst_vx * 0.6
             elif ev.code == ecodes.REL_Y:
                 state["dy"] += ev.value
                 state["pan_y"] += ev.value
+                inst_vy = ev.value / dt
+                state["vy"] = state.get("vy", 0.0) * 0.4 + inst_vy * 0.6
 
             if abs(state["dx"]) > config.drag_threshold or abs(state["dy"]) > config.drag_threshold:
                 if state.get("hold_timer"):
