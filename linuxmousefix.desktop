@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Linux Mouse Fix
+GenericName=Mouse Gesture Tool
+Comment=Mac Mouse Fix port for Ubuntu - button gestures, hot corners, zoom
+Exec=python3 /run/media/mck/Yeni Birim/AntiGravity/mouse/LinuxMouseFix/main.py
+Icon=input-mouse
+Terminal=false
+Categories=Settings;HardwareSettings;Utility;
+Keywords=mouse;gesture;button;remap;workspace;zoom;hotcorner;
+StartupNotify=true
