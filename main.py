@@ -17,6 +17,10 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     datefmt="%H:%M:%S",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("/tmp/linuxmousefix.log", mode="w")
+    ]
 )
 log = logging.getLogger("LinuxMouseFix")
 

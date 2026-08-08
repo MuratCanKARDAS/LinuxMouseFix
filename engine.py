@@ -669,11 +669,16 @@ class MouseEngine(threading.Thread):
                                 break
 
     def _track_cursor(self, ev):
-        """Track cursor for legacy delta accumulation only (not used for hot corners)."""
+        """
+        Track virtual cursor for EVDEV fallback Hot Corners.
+        Applies a 'Boundary Sync Overdrive' multiplier (4.0x) so the virtual cursor 
+        always outruns the visual pointer and safely clamps to the screen edges.
+        """
+        val = int(ev.value * 4.0)
         if ev.code == ecodes.REL_X:
-            self._cursor_x = max(0, min(self._cursor_x + ev.value, self._screen_w - 1))
+            self._cursor_x = max(0, min(self._cursor_x + val, self._screen_w - 1))
         elif ev.code == ecodes.REL_Y:
-            self._cursor_y = max(0, min(self._cursor_y + ev.value, self._screen_h - 1))
+            self._cursor_y = max(0, min(self._cursor_y + val, self._screen_h - 1))
 
     def _passthrough(self, ev):
         if self._ui:
