@@ -742,13 +742,36 @@ class MouseEngine(threading.Thread):
         pos, screen = self._hc_tracker.get_pointer_and_screen()
         source = "EVDEV_FALLBACK"
 
+        # 1. Try GNOME Shell Extension DBus (Absolute Truth on Wayland)
+        dbus_pos = None
+        try:
+            from gi.repository import Gio, GLib
+            bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+            result = bus.call_sync(
+                "org.gnome.Shell",
+                "/com/linuxmousefix/PointerTracker",
+                "com.linuxmousefix.PointerTracker",
+                "GetPosition",
+                None,
+                GLib.VariantType("(ii)"),
+                Gio.DBusCallFlags.NONE,
+                100,
+                None
+            )
+            if result:
+                x, y = result.unpack()
+                if x >= 0 and y >= 0:
+                    dbus_pos = (x, y)
+        except Exception:
+            pass
+
         # Detect Xwayland frozen pointer (X11 cursor stuck while hardware mouse moves)
-        if pos and screen and not self._hc_force_evdev:
+        if pos and screen and not self._hc_force_evdev and not dbus_pos:
             evdev_moved = (self._cursor_x != self._hc_last_evdev_x or self._cursor_y != self._hc_last_evdev_y)
             if pos == self._hc_x11_last_pos and evdev_moved:
                 self._hc_x11_stuck_count += 1
                 if self._hc_x11_stuck_count > 10:  # 500ms stuck
-                    log.error("❌ [Wayland Güvenliği] Çift Monitör ve Wayland kısıtlamaları nedeniyle Sıcak Köşeler devre dışı bırakıldı! Lütfen Fare Jestlerini kullanın.")
+                    log.error("❌ [Wayland] Çift Monitör sınırları aşıldı! DBus eklentisi aranıyor...")
                     self._hc_force_evdev = True
             elif pos != self._hc_x11_last_pos:
                 self._hc_x11_stuck_count = 0
@@ -757,11 +780,17 @@ class MouseEngine(threading.Thread):
             self._hc_last_evdev_x = self._cursor_x
             self._hc_last_evdev_y = self._cursor_y
 
-        if self._hc_force_evdev:
-            # Fallback is mathematically impossible to sync on multi-monitor Wayland
+        if dbus_pos:
+            x, y = dbus_pos
+            # DBus provides exact coords. Assume monitor 1 screen size for corner bounding if multi-monitor not specified
+            # Wait, on multi-monitor, screen size needs to be total bounding box.
+            # get_screen_size() returns total bounding box.
+            sw, sh = self._screen_w, self._screen_h
+            source = "GNOME_EXT"
+        elif self._hc_force_evdev:
+            # Fallback is mathematically impossible to sync on multi-monitor Wayland without the extension
             return True
-
-        if pos and screen:
+        elif pos and screen:
             x, y = pos
             sw, sh = screen
             source = "X11"

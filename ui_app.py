@@ -382,7 +382,7 @@ class LinuxMouseFixWindow(Adw.ApplicationWindow):
         
         if is_wayland:
             wg = Adw.PreferencesGroup()
-            lbl = Gtk.Label(label="⚠️ Wayland Güvenlik Kısıtlaması\nHarici uygulamaların farenin ekran üzerindeki mutlak (x, y) konumunu okuması\nLinux/Wayland mimarisi tarafından Kernel seviyesinde yasaklanmıştır.\nBu özellik devre dışı bırakılmıştır. Lütfen 'Fare Jestleri' (Tuş+Kaydırma) sistemini kullanın.")
+            lbl = Gtk.Label(label="⚠️ Wayland Çift Monitör Kısıtlaması\nSıcak Köşelerin Wayland üzerinde çalışabilmesi için özel 'hotcorner-tracker' eklentisine ihtiyaç vardır.\n\nTerminalde ' ./install_extension.sh ' çalıştırıp GNOME oturumunu\nkapatıp açarak eklentiyi aktif edebilirsiniz.")
             lbl.set_wrap(True)
             lbl.set_justify(Gtk.Justification.CENTER)
             lbl.set_margin_top(10)
@@ -391,8 +391,6 @@ class LinuxMouseFixWindow(Adw.ApplicationWindow):
             page.add(wg)
             
         g = Adw.PreferencesGroup(title="Sıcak Köşeler", description="Fareyi köşeye götürünce eylem tetiklenir")
-        if is_wayland:
-            g.set_sensitive(False)
             
         self._hc_switch = Adw.SwitchRow(title="Hot Corner Aktif")
         self._hc_switch.set_active(config.hot_corner_enabled)
@@ -412,9 +410,6 @@ class LinuxMouseFixWindow(Adw.ApplicationWindow):
         page.add(g)
 
         g2 = Adw.PreferencesGroup(title="Köşe Ayarları")
-        if is_wayland:
-            g2.set_sensitive(False)
-            
         delay = Adw.SpinRow.new_with_range(0, 1000, 50)
         delay.set_title("Gecikme (ms)")
         delay.set_value(config.hot_corner_delay_ms)
