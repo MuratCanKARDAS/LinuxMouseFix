@@ -197,8 +197,10 @@ class LinuxMouseFixWindow(Adw.ApplicationWindow):
 
         # ToolbarView with ViewSwitcher in header
         tv = Adw.ToolbarView()
+        tv.set_vexpand(True)
         hdr = Adw.HeaderBar()
         self._stack = Adw.ViewStack()
+        self._stack.set_vexpand(True)
         switcher = Adw.ViewSwitcher(stack=self._stack, policy=Adw.ViewSwitcherPolicy.WIDE)
         hdr.set_title_widget(switcher)
         menu = Gio.Menu()
@@ -264,20 +266,9 @@ class LinuxMouseFixWindow(Adw.ApplicationWindow):
             dialog.add_response("ok", "Tamam")
             dialog.present(self)
 
-    # ── Helper: scrollable page shell ──
-    def _make_page(self):
-        scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
-        clamp = Adw.Clamp(maximum_size=660)
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
-        box.set_margin_top(20); box.set_margin_bottom(40)
-        box.set_margin_start(16); box.set_margin_end(16)
-        clamp.set_child(box)
-        scroll.set_child(clamp)
-        return scroll, box
-
     # ═══════════════ TAB 1: OVERVIEW ═══════════════
     def _build_overview_page(self):
-        page, box = self._make_page()
+        page = Adw.PreferencesPage()
 
         # Status card
         g = Adw.PreferencesGroup(title="Durum")
@@ -293,7 +284,7 @@ class LinuxMouseFixWindow(Adw.ApplicationWindow):
         self._status_dot.set_valign(Gtk.Align.CENTER)
         self._status_row.add_suffix(self._status_dot)
         g.add(self._status_row)
-        box.append(g)
+        page.add(g)
 
         # Device info
         dg = Adw.PreferencesGroup(title="Algılanan Cihaz")
@@ -306,7 +297,7 @@ class LinuxMouseFixWindow(Adw.ApplicationWindow):
         self._device_caps_row = Adw.ActionRow(title="Özellikler", subtitle="—")
         self._device_caps_row.add_prefix(Gtk.Image.new_from_icon_name("dialog-information-symbolic"))
         dg.add(self._device_caps_row)
-        box.append(dg)
+        page.add(dg)
 
         # How-to guide
         hg = Adw.PreferencesGroup(title="Nasıl Çalışır?")
@@ -320,22 +311,19 @@ class LinuxMouseFixWindow(Adw.ApplicationWindow):
             row = Adw.ActionRow(title=t, subtitle=s)
             row.add_prefix(Gtk.Image.new_from_icon_name(ic))
             hg.add(row)
-        box.append(hg)
+        page.add(hg)
         return page
 
     # ═══════════════ TAB 2: REMAPS ═══════════════
     def _build_remaps_page(self):
-        page, box = self._make_page()
-        self._remaps_container = box
+        page = Adw.PreferencesPage()
+        self._remaps_page = page
         self._build_remaps()
         return page
 
     def _build_remaps(self):
-        child = self._remaps_container.get_first_child()
-        while child:
-            nxt = child.get_next_sibling()
-            self._remaps_container.remove(child)
-            child = nxt
+        if hasattr(self, '_remaps_group') and self._remaps_group:
+            self._remaps_page.remove(self._remaps_group)
         g = Adw.PreferencesGroup(title="Buton Atamaları", description="Buton + hareket/tekerlek → eylem")
         ab = Gtk.Button(icon_name="list-add-symbolic")
         ab.add_css_class("flat"); ab.set_tooltip_text("Yeni atama ekle")
@@ -347,11 +335,12 @@ class LinuxMouseFixWindow(Adw.ApplicationWindow):
         else:
             for i, r in enumerate(config.remaps):
                 g.add(RemapRow(i, r, self._on_del, self._on_act_change))
-        self._remaps_container.append(g)
+        self._remaps_group = g
+        self._remaps_page.add(g)
 
     # ═══════════════ TAB 3: SETTINGS ═══════════════
     def _build_settings_page(self):
-        page, box = self._make_page()
+        page = Adw.PreferencesPage()
 
         g1 = Adw.PreferencesGroup(title="2D Pan Kaydırma")
         pan_sens = Adw.SpinRow.new_with_range(5, 100, 5)
@@ -373,7 +362,7 @@ class LinuxMouseFixWindow(Adw.ApplicationWindow):
         pan_inv.set_active(config.pan_invert)
         pan_inv.connect("notify::active", lambda r, _: (setattr(config, 'pan_invert', r.get_active()), config.save()))
         g1.add(pan_inv)
-        box.append(g1)
+        page.add(g1)
 
         g2 = Adw.PreferencesGroup(title="Jest ve Sürükleme")
         drag_tr = Adw.SpinRow.new_with_range(10, 200, 5)
@@ -382,12 +371,12 @@ class LinuxMouseFixWindow(Adw.ApplicationWindow):
         drag_tr.set_value(config.drag_threshold)
         drag_tr.connect("notify::value", lambda r, _: (setattr(config, 'drag_threshold', int(r.get_value())), config.save()))
         g2.add(drag_tr)
-        box.append(g2)
+        page.add(g2)
         return page
 
     # ═══════════════ TAB 4: HOT CORNERS ═══════════════
     def _build_hot_corners_page(self):
-        page, box = self._make_page()
+        page = Adw.PreferencesPage()
         g = Adw.PreferencesGroup(title="Sıcak Köşeler", description="Fareyi köşeye götürünce eylem tetiklenir")
         self._hc_switch = Adw.SwitchRow(title="Hot Corner Aktif")
         self._hc_switch.set_active(config.hot_corner_enabled)
@@ -404,7 +393,7 @@ class LinuxMouseFixWindow(Adw.ApplicationWindow):
             except ValueError: pass
             row.connect("notify::selected", self._make_hc_handler(cid, hc_keys))
             g.add(row)
-        box.append(g)
+        page.add(g)
 
         g2 = Adw.PreferencesGroup(title="Köşe Ayarları")
         delay = Adw.SpinRow.new_with_range(0, 1000, 50)
@@ -417,7 +406,7 @@ class LinuxMouseFixWindow(Adw.ApplicationWindow):
         sz.set_value(config.hot_corner_size)
         sz.connect("notify::value", lambda r, _: (setattr(config, 'hot_corner_size', int(r.get_value())), config.save()))
         g2.add(sz)
-        box.append(g2)
+        page.add(g2)
         return page
 
     def _make_hc_handler(self, corner_id, keys):
