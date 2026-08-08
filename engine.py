@@ -309,45 +309,71 @@ class MouseEngine(threading.Thread):
         self._inertia_active = True
 
         def inertia_loop():
-            curr_vx = vx * 0.35
-            curr_vy = vy * 0.35
-            accum_x = 0.0
-            accum_y = 0.0
-            friction = 0.90  # Decay factor per 15ms frame for smooth glide & stop
+            # Initial momentum velocity scaling
+            curr_vx = vx * 0.40
+            curr_vy = vy * 0.40
+
+            friction = 0.945  # Decay factor per 8ms frame for ultra-smooth 125Hz glide
+            dt = 0.008
+
+            hi_res_accum_x = 0.0
+            hi_res_accum_y = 0.0
+            wheel_accum_x = 0.0
+            wheel_accum_y = 0.0
 
             while self._inertia_active and self._running:
                 curr_vx *= friction
                 curr_vy *= friction
 
-                if abs(curr_vx) < 15 and abs(curr_vy) < 15:
+                if abs(curr_vx) < 10 and abs(curr_vy) < 10:
                     break
-
-                dt = 0.015
-                accum_x += curr_vx * dt
-                accum_y += curr_vy * dt
 
                 sens = max(1, config.pan_sensitivity)
                 inv = -1 if config.pan_invert else 1
 
-                if abs(accum_y) >= sens:
-                    steps = int(accum_y / sens)
-                    direction = -steps * inv
-                    if self._ui:
-                        self._ui.write(ecodes.EV_REL, ecodes.REL_WHEEL, direction)
-                        if hasattr(ecodes, 'REL_WHEEL_HI_RES'):
-                            self._ui.write(ecodes.EV_REL, ecodes.REL_WHEEL_HI_RES, direction * 120)
-                        self._ui.syn()
-                    accum_y -= steps * sens
+                # Calculate sub-pixel hi-res delta (120 units per full notch)
+                step_hi_res_y = (curr_vy * dt * 120.0 / sens) * inv
+                step_hi_res_x = (curr_vx * dt * 120.0 / sens) * inv
 
-                if abs(accum_x) >= sens:
-                    steps = int(accum_x / sens)
-                    direction = steps * inv
+                hi_res_accum_y += step_hi_res_y
+                hi_res_accum_x += step_hi_res_x
+                wheel_accum_y += step_hi_res_y
+                wheel_accum_x += step_hi_res_x
+
+                wrote_event = False
+
+                # Send Hi-Res scroll events continuously for sub-pixel smooth rendering
+                if abs(hi_res_accum_y) >= 1.0:
+                    val = int(hi_res_accum_y)
+                    hi_res_accum_y -= val
+                    if self._ui and hasattr(ecodes, 'REL_WHEEL_HI_RES'):
+                        self._ui.write(ecodes.EV_REL, ecodes.REL_WHEEL_HI_RES, -val)
+                        wrote_event = True
+
+                if abs(hi_res_accum_x) >= 1.0:
+                    val = int(hi_res_accum_x)
+                    hi_res_accum_x -= val
+                    if self._ui and hasattr(ecodes, 'REL_HWHEEL_HI_RES'):
+                        self._ui.write(ecodes.EV_REL, ecodes.REL_HWHEEL_HI_RES, val)
+                        wrote_event = True
+
+                # Send standard notch REL_WHEEL events for legacy apps when 120 units accumulate
+                if abs(wheel_accum_y) >= 120.0:
+                    steps = int(wheel_accum_y / 120.0)
+                    wheel_accum_y -= steps * 120.0
                     if self._ui:
-                        self._ui.write(ecodes.EV_REL, ecodes.REL_HWHEEL, direction)
-                        if hasattr(ecodes, 'REL_HWHEEL_HI_RES'):
-                            self._ui.write(ecodes.EV_REL, ecodes.REL_HWHEEL_HI_RES, direction * 120)
-                        self._ui.syn()
-                    accum_x -= steps * sens
+                        self._ui.write(ecodes.EV_REL, ecodes.REL_WHEEL, -steps)
+                        wrote_event = True
+
+                if abs(wheel_accum_x) >= 120.0:
+                    steps = int(wheel_accum_x / 120.0)
+                    wheel_accum_x -= steps * 120.0
+                    if self._ui:
+                        self._ui.write(ecodes.EV_REL, ecodes.REL_HWHEEL, steps)
+                        wrote_event = True
+
+                if wrote_event and self._ui:
+                    self._ui.syn()
 
                 time.sleep(dt)
 
@@ -393,8 +419,7 @@ class MouseEngine(threading.Thread):
             self._pressed_buttons[btn] = {
                 "dx": 0, "dy": 0,
                 "pan_x": 0, "pan_y": 0,
-                "vx": 0.0, "vy": 0.0,
-                "last_move_time": time.monotonic(),
+                "samples": [],
                 "triggered": False,
                 "evcode": ev.code,
                 "last_trigger_time": 0,
@@ -405,8 +430,7 @@ class MouseEngine(threading.Thread):
                 self._pressed_buttons[btn] = {
                     "dx": 0, "dy": 0,
                     "pan_x": 0, "pan_y": 0,
-                    "vx": 0.0, "vy": 0.0,
-                    "last_move_time": time.monotonic(),
+                    "samples": [],
                     "triggered": False,
                     "evcode": ev.code,
                     "last_trigger_time": 0,
@@ -426,10 +450,17 @@ class MouseEngine(threading.Thread):
                 )
 
                 if state["triggered"] and is_pan:
-                    vx = state.get("vx", 0.0)
-                    vy = state.get("vy", 0.0)
-                    if abs(vx) > 30 or abs(vy) > 30:
-                        self._start_inertia(vx, vy)
+                    now = time.monotonic()
+                    samples = state.get("samples", [])
+                    # Only trigger momentum if mouse was actively moving in the last 45ms before release
+                    if samples and (now - samples[-1][0]) <= 0.045 and len(samples) >= 2:
+                        dt = max(0.010, samples[-1][0] - samples[0][0])
+                        total_dx = sum(s[1] for s in samples)
+                        total_dy = sum(s[2] for s in samples)
+                        vx = total_dx / dt
+                        vy = total_dy / dt
+                        if abs(vx) > 40 or abs(vy) > 40:
+                            self._start_inertia(vx, vy)
 
                 if not state["triggered"]:
                     action = config.get_action(btn, "click")
@@ -504,20 +535,21 @@ class MouseEngine(threading.Thread):
             )
 
             now = time.monotonic()
-            last_t = state.get("last_move_time", now)
-            dt = max(0.003, now - last_t)
-            state["last_move_time"] = now
+            dx = ev.value if ev.code == ecodes.REL_X else 0
+            dy = ev.value if ev.code == ecodes.REL_Y else 0
+
+            # Store recent samples in ring buffer for precise flick velocity calculation
+            samples = state.setdefault("samples", [])
+            samples.append((now, dx, dy))
+            # Keep only samples within the last 80ms window
+            state["samples"] = [s for s in samples if s[0] >= now - 0.080]
 
             if ev.code == ecodes.REL_X:
                 state["dx"] += ev.value
                 state["pan_x"] += ev.value
-                inst_vx = ev.value / dt
-                state["vx"] = state.get("vx", 0.0) * 0.4 + inst_vx * 0.6
             elif ev.code == ecodes.REL_Y:
                 state["dy"] += ev.value
                 state["pan_y"] += ev.value
-                inst_vy = ev.value / dt
-                state["vy"] = state.get("vy", 0.0) * 0.4 + inst_vy * 0.6
 
             if abs(state["dx"]) > config.drag_threshold or abs(state["dy"]) > config.drag_threshold:
                 if state.get("hold_timer"):
