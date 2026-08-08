@@ -183,55 +183,53 @@ class LinuxMouseFixWindow(Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app)
         self.set_title("Linux Mouse Fix")
-        self.set_default_size(630, 860)
+        self.set_default_size(660, 780)
 
+        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+
+        # Permission Banner at very top
+        self._perm_banner = Adw.Banner()
+        self._perm_banner.set_title("⚠️ Mouse erişim izinleri eksik.")
+        self._perm_banner.set_button_label("İzinleri Yapılandır")
+        self._perm_banner.connect("button-clicked", self._on_fix_permissions)
+        self._perm_banner.set_revealed(False)
+        main_box.append(self._perm_banner)
+
+        # ToolbarView with ViewSwitcher in header
         tv = Adw.ToolbarView()
         hdr = Adw.HeaderBar()
-        hdr.set_title_widget(Adw.WindowTitle(title="Linux Mouse Fix", subtitle="v6.0 — 2D Pan ve Gesture Aracı"))
+        self._stack = Adw.ViewStack()
+        switcher = Adw.ViewSwitcher(stack=self._stack, policy=Adw.ViewSwitcherPolicy.WIDE)
+        hdr.set_title_widget(switcher)
         menu = Gio.Menu()
         menu.append("Varsayılana Sıfırla", "app.reset")
         menu.append("Hakkında", "app.about")
         hdr.pack_end(Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu))
         tv.add_top_bar(hdr)
 
-        scroll = Gtk.ScrolledWindow()
-        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        clamp = Adw.Clamp(maximum_size=660)
-        self._box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
-        self._box.set_margin_top(20)
-        self._box.set_margin_bottom(40)
-        self._box.set_margin_start(16)
-        self._box.set_margin_end(16)
+        # Bottom switcher bar for narrow windows
+        bottom_bar = Adw.ViewSwitcherBar(stack=self._stack)
+        tv.add_bottom_bar(bottom_bar)
 
-        # Permission Setup Banner
-        self._perm_banner = Adw.Banner()
-        self._perm_banner.set_title("⚠️ Mouse erişim izinleri eksik. Motor başlatılamıyor.")
-        self._perm_banner.set_button_label("İzinleri Yapılandır")
-        self._perm_banner.connect("button-clicked", self._on_fix_permissions)
-        self._perm_banner.set_revealed(False)
-        self._box.append(self._perm_banner)
+        # --- Tab 1: Overview ---
+        page1 = self._build_overview_page()
+        self._stack.add_titled_with_icon(page1, "overview", "Genel", "go-home-symbolic")
 
-        self._build_status()
-        self._build_device_info()
+        # --- Tab 2: Remaps ---
+        page2 = self._build_remaps_page()
+        self._stack.add_titled_with_icon(page2, "remaps", "Atamalar", "input-mouse-symbolic")
 
-        banner = Adw.Banner()
-        banner.set_title("💡 Yan butona basıp fareyi gezdirin: Excel ve web sayfalarında hem yatay hem dikey 2D Pan yapın!")
-        banner.set_revealed(True)
-        self._box.append(banner)
+        # --- Tab 3: Settings ---
+        page3 = self._build_settings_page()
+        self._stack.add_titled_with_icon(page3, "settings", "Ayarlar", "emblem-system-symbolic")
 
-        self._remaps_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self._box.append(self._remaps_container)
-        self._build_remaps()
+        # --- Tab 4: Hot Corners ---
+        page4 = self._build_hot_corners_page()
+        self._stack.add_titled_with_icon(page4, "hotcorners", "Köşeler", "view-grid-symbolic")
 
-        self._build_hot_corners()
-        self._build_settings()
-        self._build_howto()
-
-        clamp.set_child(self._box)
-        scroll.set_child(clamp)
-        tv.set_content(scroll)
-        self.set_content(tv)
-
+        tv.set_content(self._stack)
+        main_box.append(tv)
+        self.set_content(main_box)
         self.check_perm_status()
 
     def check_perm_status(self):
@@ -266,13 +264,27 @@ class LinuxMouseFixWindow(Adw.ApplicationWindow):
             dialog.add_response("ok", "Tamam")
             dialog.present(self)
 
-    def _build_status(self):
+    # ── Helper: scrollable page shell ──
+    def _make_page(self):
+        scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
+        clamp = Adw.Clamp(maximum_size=660)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
+        box.set_margin_top(20); box.set_margin_bottom(40)
+        box.set_margin_start(16); box.set_margin_end(16)
+        clamp.set_child(box)
+        scroll.set_child(clamp)
+        return scroll, box
+
+    # ═══════════════ TAB 1: OVERVIEW ═══════════════
+    def _build_overview_page(self):
+        page, box = self._make_page()
+
+        # Status card
         g = Adw.PreferencesGroup(title="Durum")
         self._enable_row = Adw.SwitchRow(title="Motor Aktif", subtitle="Mouse yakalama ve yönlendirme")
         self._enable_row.set_active(config.enabled)
         self._enable_row.connect("notify::active", lambda r, _: (setattr(config, 'enabled', r.get_active()), config.save()))
         g.add(self._enable_row)
-
         self._status_row = Adw.ActionRow(title="Bağlantı", subtitle="Başlatılıyor...")
         self._status_icon = Gtk.Image.new_from_icon_name("network-offline-symbolic")
         self._status_row.add_prefix(self._status_icon)
@@ -281,20 +293,42 @@ class LinuxMouseFixWindow(Adw.ApplicationWindow):
         self._status_dot.set_valign(Gtk.Align.CENTER)
         self._status_row.add_suffix(self._status_dot)
         g.add(self._status_row)
-        self._box.append(g)
+        box.append(g)
 
-    def _build_device_info(self):
-        self._device_group = Adw.PreferencesGroup(title="🖱️ Algılanan Cihaz", description="Otomatik algılanan mouse ve butonları")
+        # Device info
+        dg = Adw.PreferencesGroup(title="Algılanan Cihaz")
         self._device_name_row = Adw.ActionRow(title="Cihaz", subtitle="Algılanıyor...")
         self._device_name_row.add_prefix(Gtk.Image.new_from_icon_name("input-mouse-symbolic"))
-        self._device_group.add(self._device_name_row)
+        dg.add(self._device_name_row)
         self._device_buttons_row = Adw.ActionRow(title="Butonlar", subtitle="—")
         self._device_buttons_row.add_prefix(Gtk.Image.new_from_icon_name("preferences-desktop-peripherals-symbolic"))
-        self._device_group.add(self._device_buttons_row)
+        dg.add(self._device_buttons_row)
         self._device_caps_row = Adw.ActionRow(title="Özellikler", subtitle="—")
         self._device_caps_row.add_prefix(Gtk.Image.new_from_icon_name("dialog-information-symbolic"))
-        self._device_group.add(self._device_caps_row)
-        self._box.append(self._device_group)
+        dg.add(self._device_caps_row)
+        box.append(dg)
+
+        # How-to guide
+        hg = Adw.PreferencesGroup(title="Nasıl Çalışır?")
+        for ic, t, s in [
+            ("pan-up-symbolic", "Yan buton basılı + fareyi gezdir", "2D Pan (Yatay + Dikey Kaydırma)"),
+            ("go-next-symbolic", "Yan buton basılı + sağa/sola çek", "Masaüstü değiştirir"),
+            ("zoom-in-symbolic", "Yan buton basılı + tekerlek", "Yakınlaştır / Uzaklaştır"),
+            ("input-mouse-symbolic", "Yan butona sadece tıkla", "Geri/İleri navigasyon"),
+            ("view-grid-symbolic", "Fareyi köşelere götür", "Hot corner eylemi"),
+        ]:
+            row = Adw.ActionRow(title=t, subtitle=s)
+            row.add_prefix(Gtk.Image.new_from_icon_name(ic))
+            hg.add(row)
+        box.append(hg)
+        return page
+
+    # ═══════════════ TAB 2: REMAPS ═══════════════
+    def _build_remaps_page(self):
+        page, box = self._make_page()
+        self._remaps_container = box
+        self._build_remaps()
+        return page
 
     def _build_remaps(self):
         child = self._remaps_container.get_first_child()
@@ -302,65 +336,89 @@ class LinuxMouseFixWindow(Adw.ApplicationWindow):
             nxt = child.get_next_sibling()
             self._remaps_container.remove(child)
             child = nxt
-
-        g = Adw.PreferencesGroup(title="⚡ Buton Atamaları", description="Buton + hareket/tekerlek → eylem")
+        g = Adw.PreferencesGroup(title="Buton Atamaları", description="Buton + hareket/tekerlek → eylem")
         ab = Gtk.Button(icon_name="list-add-symbolic")
-        ab.add_css_class("flat")
-        ab.set_tooltip_text("Yeni atama ekle")
+        ab.add_css_class("flat"); ab.set_tooltip_text("Yeni atama ekle")
         ab.set_valign(Gtk.Align.CENTER)
         ab.connect("clicked", self._on_add)
         g.set_header_suffix(ab)
-
         if not config.remaps:
-            g.add(Adw.ActionRow(title="Atama yok", subtitle="+ ile ekleyin"))
+            g.add(Adw.ActionRow(title="Henüz atama yok", subtitle="Sağ üstteki + ile yeni atama ekleyin"))
         else:
             for i, r in enumerate(config.remaps):
                 g.add(RemapRow(i, r, self._on_del, self._on_act_change))
         self._remaps_container.append(g)
 
-    def _build_hot_corners(self):
-        g = Adw.PreferencesGroup(title="🔲 Hot Corner (Sıcak Köşe)", description="Fareyi köşeye götürünce eylem tetiklenir")
+    # ═══════════════ TAB 3: SETTINGS ═══════════════
+    def _build_settings_page(self):
+        page, box = self._make_page()
 
+        g1 = Adw.PreferencesGroup(title="2D Pan Kaydırma")
+        pan_sens = Adw.SpinRow.new_with_range(5, 100, 5)
+        pan_sens.set_title("Hassasiyet")
+        pan_sens.set_subtitle("Yüksek = Yavaş/Hassas, Düşük = Hızlı")
+        pan_sens.set_value(config.pan_sensitivity)
+        pan_sens.connect("notify::value", lambda r, _: (setattr(config, 'pan_sensitivity', int(r.get_value())), config.save()))
+        g1.add(pan_sens)
+
+        pan_ine = Adw.SpinRow.new_with_range(0, 100, 5)
+        pan_ine.set_title("Momentum Süzülme")
+        pan_ine.set_subtitle("0 = Anında Dur, 50 = Normal, 100 = Uzun Süzülme")
+        pan_ine.set_value(config.pan_inertia)
+        pan_ine.connect("notify::value", lambda r, _: (setattr(config, 'pan_inertia', int(r.get_value())), config.save()))
+        g1.add(pan_ine)
+
+        pan_inv = Adw.SwitchRow(title="Doğal Yön (Natural Pan)")
+        pan_inv.set_subtitle("Fareyi aşağı çekince sayfayı yukarı kaydırır")
+        pan_inv.set_active(config.pan_invert)
+        pan_inv.connect("notify::active", lambda r, _: (setattr(config, 'pan_invert', r.get_active()), config.save()))
+        g1.add(pan_inv)
+        box.append(g1)
+
+        g2 = Adw.PreferencesGroup(title="Jest ve Sürükleme")
+        drag_tr = Adw.SpinRow.new_with_range(10, 200, 5)
+        drag_tr.set_title("Sürükleme Eşiği")
+        drag_tr.set_subtitle("Masaüstü değiştirme piksel eşiği")
+        drag_tr.set_value(config.drag_threshold)
+        drag_tr.connect("notify::value", lambda r, _: (setattr(config, 'drag_threshold', int(r.get_value())), config.save()))
+        g2.add(drag_tr)
+        box.append(g2)
+        return page
+
+    # ═══════════════ TAB 4: HOT CORNERS ═══════════════
+    def _build_hot_corners_page(self):
+        page, box = self._make_page()
+        g = Adw.PreferencesGroup(title="Sıcak Köşeler", description="Fareyi köşeye götürünce eylem tetiklenir")
         self._hc_switch = Adw.SwitchRow(title="Hot Corner Aktif")
         self._hc_switch.set_active(config.hot_corner_enabled)
         self._hc_switch.connect("notify::active", lambda r, _: (setattr(config, 'hot_corner_enabled', r.get_active()), config.save()))
         g.add(self._hc_switch)
-
-        corners = [
-            ("top_left", "↖ Sol Üst Köşe"),
-            ("top_right", "↗ Sağ Üst Köşe"),
-            ("bottom_left", "↙ Sol Alt Köşe"),
-            ("bottom_right", "↘ Sağ Alt Köşe"),
-        ]
         hc_keys = list(HOT_CORNER_ACTIONS.keys())
-        for cid, clabel in corners:
+        for cid, clabel in [("top_left","↖ Sol Üst"),("top_right","↗ Sağ Üst"),("bottom_left","↙ Sol Alt"),("bottom_right","↘ Sağ Alt")]:
             model = Gtk.StringList()
             for k in hc_keys:
                 model.append(HOT_CORNER_ACTIONS[k])
             row = Adw.ComboRow(title=clabel, model=model)
             cur = config.get_hot_corner_action(cid)
-            try:
-                row.set_selected(hc_keys.index(cur))
-            except ValueError:
-                pass
+            try: row.set_selected(hc_keys.index(cur))
+            except ValueError: pass
             row.connect("notify::selected", self._make_hc_handler(cid, hc_keys))
             g.add(row)
+        box.append(g)
 
-        delay_row = Adw.SpinRow.new_with_range(0, 1000, 50)
-        delay_row.set_title("Gecikme (ms)")
-        delay_row.set_subtitle("Köşede bekleme süresi")
-        delay_row.set_value(config.hot_corner_delay_ms)
-        delay_row.connect("notify::value", lambda r, _: (setattr(config, 'hot_corner_delay_ms', int(r.get_value())), config.save()))
-        g.add(delay_row)
-
-        sz_row = Adw.SpinRow.new_with_range(1, 30, 1)
-        sz_row.set_title("Köşe Boyutu (px)")
-        sz_row.set_subtitle("Tetikleme alanı piksel genişliği")
-        sz_row.set_value(config.hot_corner_size)
-        sz_row.connect("notify::value", lambda r, _: (setattr(config, 'hot_corner_size', int(r.get_value())), config.save()))
-        g.add(sz_row)
-
-        self._box.append(g)
+        g2 = Adw.PreferencesGroup(title="Köşe Ayarları")
+        delay = Adw.SpinRow.new_with_range(0, 1000, 50)
+        delay.set_title("Gecikme (ms)")
+        delay.set_value(config.hot_corner_delay_ms)
+        delay.connect("notify::value", lambda r, _: (setattr(config, 'hot_corner_delay_ms', int(r.get_value())), config.save()))
+        g2.add(delay)
+        sz = Adw.SpinRow.new_with_range(1, 30, 1)
+        sz.set_title("Köşe Boyutu (px)")
+        sz.set_value(config.hot_corner_size)
+        sz.connect("notify::value", lambda r, _: (setattr(config, 'hot_corner_size', int(r.get_value())), config.save()))
+        g2.add(sz)
+        box.append(g2)
+        return page
 
     def _make_hc_handler(self, corner_id, keys):
         def handler(row, _):
@@ -368,57 +426,6 @@ class LinuxMouseFixWindow(Adw.ApplicationWindow):
             if 0 <= idx < len(keys):
                 config.set_hot_corner(corner_id, keys[idx])
         return handler
-
-    def _build_settings(self):
-        g = Adw.PreferencesGroup(title="⚙️ Pan ve Sürükleme Ayarları")
-
-        # Pan Sensitivity (5 to 100 px per notch)
-        pan_sens_row = Adw.SpinRow.new_with_range(5, 100, 5)
-        pan_sens_row.set_title("2D Pan Kaydırma Hassasiyeti")
-        pan_sens_row.set_subtitle("Yüksek Değer = Yavaş/Hassas Kaydırma, Düşük Değer = Hızlı Kaydırma (Piksel/Adım)")
-        pan_sens_row.set_value(config.pan_sensitivity)
-        pan_sens_row.connect("notify::value", lambda r, _: (setattr(config, 'pan_sensitivity', int(r.get_value())), config.save()))
-        g.add(pan_sens_row)
-
-        # Pan Inertia / Momentum Duration (0 to 100)
-        pan_ine_row = Adw.SpinRow.new_with_range(0, 100, 5)
-        pan_ine_row.set_title("Ataletli Yumuşak Süzülme (Momentum Glide)")
-        pan_ine_row.set_subtitle("0 = Anında Dur, 50 = Standart, 70-100 = Uzun ve Akıcı Süzülme")
-        pan_ine_row.set_value(config.pan_inertia)
-        pan_ine_row.connect("notify::value", lambda r, _: (setattr(config, 'pan_inertia', int(r.get_value())), config.save()))
-        g.add(pan_ine_row)
-
-        # Pan Invert
-        pan_inv_row = Adw.SwitchRow(title="Pan Yönünü Tersine Çevir (Natural Pan)")
-        pan_inv_row.set_subtitle("Fareyi aşağı çekince sayfayı yukarı kaydırır")
-        pan_inv_row.set_active(config.pan_invert)
-        pan_inv_row.connect("notify::active", lambda r, _: (setattr(config, 'pan_invert', r.get_active()), config.save()))
-        g.add(pan_inv_row)
-
-        # Drag threshold
-        tr = Adw.SpinRow.new_with_range(10, 200, 5)
-        tr.set_title("Jest Sürükleme Eşiği (Drag Threshold)")
-        tr.set_subtitle("Masaüstü değiştirme sürükleme piksel eşiği")
-        tr.set_value(config.drag_threshold)
-        tr.connect("notify::value", lambda r, _: (setattr(config, 'drag_threshold', int(r.get_value())), config.save()))
-        g.add(tr)
-
-        self._box.append(g)
-
-    def _build_howto(self):
-        g = Adw.PreferencesGroup(title="📖 Nasıl Çalışır?")
-        items = [
-            ("pan-up-symbolic", "Yan butona basılı tut + fareyi gezdir", "Excel ve web sayfalarında 2D Pan (Yatay + Dikey Kaydırma)"),
-            ("go-next-symbolic", "Yan buton basılı + hızlı sağa/sola çek", "Masaüstü değiştirir"),
-            ("zoom-in-symbolic", "Yan buton basılı + tekerlek", "Sayfayı Yakınlaştır / Uzaklaştır"),
-            ("input-mouse-symbolic", "Yan butona sadece tıkla", "Geri/İleri navigasyon"),
-            ("view-grid-symbolic", "Fareyi köşelere götür", "Hot corner eylemi tetikler"),
-        ]
-        for ic, t, s in items:
-            row = Adw.ActionRow(title=t, subtitle=s)
-            row.add_prefix(Gtk.Image.new_from_icon_name(ic))
-            g.add(row)
-        self._box.append(g)
 
     def _on_add(self, _):
         AddRemapDialog(self._do_add).present(self)
@@ -490,14 +497,22 @@ class LinuxMouseFixApp(Adw.Application):
 
     def _load_css(self):
         css = b"""
-        .remap-badge { border-radius: 10px; font-weight: 800; font-size: 14px; color: white; min-width: 36px; min-height: 36px; }
-        .badge-btn-1 { background: #26a269; } .badge-btn-2 { background: #c64600; }
-        .badge-btn-3 { background: #3584e4; } .badge-btn-4 { background: #e66100; }
-        .badge-btn-5 { background: #9141ac; } .badge-btn-6 { background: #2ec27e; }
-        .badge-btn-7 { background: #a51d2d; } .badge-btn-8 { background: #1a5fb4; }
-        .badge-btn-9 { background: #613583; }
-        .status-active  { color: #2ec27e; font-size: 22px; }
-        .status-inactive { color: #e5a50a; font-size: 22px; }
+        .remap-badge {
+            border-radius: 12px; font-weight: 800; font-size: 13px;
+            color: white; min-width: 34px; min-height: 34px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.18);
+        }
+        .badge-btn-1 { background: linear-gradient(135deg, #2ec27e, #26a269); }
+        .badge-btn-2 { background: linear-gradient(135deg, #e66100, #c64600); }
+        .badge-btn-3 { background: linear-gradient(135deg, #62a0ea, #3584e4); }
+        .badge-btn-4 { background: linear-gradient(135deg, #ff7800, #e66100); }
+        .badge-btn-5 { background: linear-gradient(135deg, #c061cb, #9141ac); }
+        .badge-btn-6 { background: linear-gradient(135deg, #57e389, #2ec27e); }
+        .badge-btn-7 { background: linear-gradient(135deg, #ed333b, #a51d2d); }
+        .badge-btn-8 { background: linear-gradient(135deg, #3584e4, #1a5fb4); }
+        .badge-btn-9 { background: linear-gradient(135deg, #9141ac, #613583); }
+        .status-active  { color: #2ec27e; font-size: 24px; text-shadow: 0 0 8px rgba(46,194,126,0.5); }
+        .status-inactive { color: #e5a50a; font-size: 24px; }
         """
         p = Gtk.CssProvider()
         p.load_from_data(css)
@@ -536,10 +551,10 @@ class LinuxMouseFixApp(Adw.Application):
     def _on_about(self, *_):
         a = Adw.AboutDialog()
         a.set_application_name("Linux Mouse Fix")
-        a.set_version("6.0.0")
-        a.set_developer_name("LinuxMouseFix")
+        a.set_version("7.0.0")
+        a.set_developer_name("Murat Can KARDAS")
         a.set_application_icon("input-mouse-symbolic")
-        a.set_comments("Mac Mouse Fix'ten ilham alınarak geliştirilmiş\nkapsamlı Ubuntu mouse gesture aracı.\n\n• 2D Pan / Sayfa Kaydırma (Excel/Tarayıcı)\n• Buton + kaydır → masaüstü değiştir\n• Buton + tekerlek → zoom\n• Hot corners")
+        a.set_comments("Mac Mouse Fix'ten ilham alınarak geliştirilmiş\nLinux mouse gesture ve 2D pan aracı.\n\n• Momentum destekli 2D Pan kaydırma\n• Buton + sürükleme jestleri\n• Sıcak köşe eylemleri\n• Tam özelleştirme")
         a.set_license_type(Gtk.License.MIT_X11)
         a.present(self._window)
 
