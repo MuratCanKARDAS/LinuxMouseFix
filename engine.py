@@ -679,16 +679,11 @@ class MouseEngine(threading.Thread):
                                 break
 
     def _track_cursor(self, ev):
-        """
-        Track virtual cursor for EVDEV fallback Hot Corners.
-        Applies a 'Boundary Sync Overdrive' multiplier (4.0x) so the virtual cursor 
-        always outruns the visual pointer and safely clamps to the screen edges.
-        """
-        val = int(ev.value * 4.0)
+        """Track cursor for legacy delta accumulation only."""
         if ev.code == ecodes.REL_X:
-            self._cursor_x = max(0, min(self._cursor_x + val, self._screen_w - 1))
+            self._cursor_x = max(0, min(self._cursor_x + ev.value, self._screen_w - 1))
         elif ev.code == ecodes.REL_Y:
-            self._cursor_y = max(0, min(self._cursor_y + val, self._screen_h - 1))
+            self._cursor_y = max(0, min(self._cursor_y + ev.value, self._screen_h - 1))
 
     def _passthrough(self, ev):
         if self._ui:
@@ -753,7 +748,7 @@ class MouseEngine(threading.Thread):
             if pos == self._hc_x11_last_pos and evdev_moved:
                 self._hc_x11_stuck_count += 1
                 if self._hc_x11_stuck_count > 10:  # 500ms stuck
-                    log.warning("⚠️ [HotCorner] X11 Pointer is FROZEN (Xwayland issue). Switching to pure EVDEV fallback!")
+                    log.error("❌ [Wayland Güvenliği] Çift Monitör ve Wayland kısıtlamaları nedeniyle Sıcak Köşeler devre dışı bırakıldı! Lütfen Fare Jestlerini kullanın.")
                     self._hc_force_evdev = True
             elif pos != self._hc_x11_last_pos:
                 self._hc_x11_stuck_count = 0
@@ -762,16 +757,16 @@ class MouseEngine(threading.Thread):
             self._hc_last_evdev_x = self._cursor_x
             self._hc_last_evdev_y = self._cursor_y
 
-        if pos and screen and not self._hc_force_evdev:
+        if self._hc_force_evdev:
+            # Fallback is mathematically impossible to sync on multi-monitor Wayland
+            return True
+
+        if pos and screen:
             x, y = pos
             sw, sh = screen
             source = "X11"
         else:
-            x = self._cursor_x
-            y = self._cursor_y
-            sw = self._screen_w
-            sh = self._screen_h
-            source = "EVDEV_FALLBACK"
+            return True
 
         # Log status every 3 seconds for diagnostics
         if now - self._hc_last_log_time >= 3.0:
