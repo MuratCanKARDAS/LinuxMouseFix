@@ -634,6 +634,7 @@ class MouseEngine(threading.Thread):
                     if trigger:
                         action = config.get_action(btn, trigger)
                         if action and action != "none":
+                            log.info(f"✨ [Gesture] Button {btn} + {trigger} -> Executing: {action}")
                             actions.execute(action)
                             state["triggered"] = True
                             state["last_trigger_time"] = time.monotonic()
