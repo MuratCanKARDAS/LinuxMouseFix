@@ -704,45 +704,64 @@ class MouseEngine(threading.Thread):
 class X11PointerTracker:
     def __init__(self):
         self._x11 = None
+        self._display = None
         try:
             self._x11 = ctypes.cdll.LoadLibrary("libX11.so.6")
+            if hasattr(self._x11, "XInitThreads"):
+                self._x11.XInitThreads()
         except Exception as e:
             log.warning(f"Could not load libX11.so.6: {e}")
 
-    def get_pointer_and_screen(self):
+    def _ensure_display(self):
+        if self._display:
+            return True
         if not self._x11:
-            return None, None
+            return False
         try:
             disp_name = os.environ.get("DISPLAY", ":0").encode()
-            display = self._x11.XOpenDisplay(disp_name)
-            if not display:
-                display = self._x11.XOpenDisplay(b":0")
-            if not display:
-                display = self._x11.XOpenDisplay(b":1")
-            if not display:
-                return None, None
+            self._display = self._x11.XOpenDisplay(disp_name)
+            if not self._display:
+                self._display = self._x11.XOpenDisplay(b":0")
+            if not self._display:
+                self._display = self._x11.XOpenDisplay(b":1")
+        except Exception:
+            self._display = None
+        return self._display is not None
 
-            root = self._x11.XDefaultRootWindow(display)
+    def get_pointer_and_screen(self):
+        if not self._ensure_display():
+            return None, None
+        try:
+            root = self._x11.XDefaultRootWindow(self._display)
             root_x, root_y = ctypes.c_int(), ctypes.c_int()
             win_x, win_y = ctypes.c_int(), ctypes.c_int()
             mask, child = ctypes.c_uint(), ctypes.c_ulong()
 
             res = self._x11.XQueryPointer(
-                display, root,
+                self._display, root,
                 ctypes.byref(child), ctypes.byref(child),
                 ctypes.byref(root_x), ctypes.byref(root_y),
                 ctypes.byref(win_x), ctypes.byref(win_y),
                 ctypes.byref(mask)
             )
-            sw = self._x11.XDisplayWidth(display, 0)
-            sh = self._x11.XDisplayHeight(display, 0)
-            self._x11.XCloseDisplay(display)
+            sw = self._x11.XDisplayWidth(self._display, 0)
+            sh = self._x11.XDisplayHeight(self._display, 0)
 
             if res != 0:
                 return (root_x.value, root_y.value), (sw, sh)
+            else:
+                self.close()
         except Exception:
-            pass
+            self.close()
         return None, None
+
+    def close(self):
+        if self._display and self._x11:
+            try:
+                self._x11.XCloseDisplay(self._display)
+            except Exception:
+                pass
+        self._display = None
 
 
 class HotCornerDaemon(threading.Thread):
