@@ -9,6 +9,7 @@ import time
 import logging
 import subprocess
 import os
+import ctypes
 
 try:
     import evdev
@@ -700,42 +701,92 @@ class MouseEngine(threading.Thread):
                 pass
 
 
+class X11PointerTracker:
+    def __init__(self):
+        self._x11 = None
+        try:
+            self._x11 = ctypes.cdll.LoadLibrary("libX11.so.6")
+        except Exception as e:
+            log.warning(f"Could not load libX11.so.6: {e}")
+
+    def get_pointer_and_screen(self):
+        if not self._x11:
+            return None, None
+        try:
+            disp_name = os.environ.get("DISPLAY", ":0").encode()
+            display = self._x11.XOpenDisplay(disp_name)
+            if not display:
+                display = self._x11.XOpenDisplay(b":0")
+            if not display:
+                display = self._x11.XOpenDisplay(b":1")
+            if not display:
+                return None, None
+
+            root = self._x11.XDefaultRootWindow(display)
+            root_x, root_y = ctypes.c_int(), ctypes.c_int()
+            win_x, win_y = ctypes.c_int(), ctypes.c_int()
+            mask, child = ctypes.c_uint(), ctypes.c_ulong()
+
+            res = self._x11.XQueryPointer(
+                display, root,
+                ctypes.byref(child), ctypes.byref(child),
+                ctypes.byref(root_x), ctypes.byref(root_y),
+                ctypes.byref(win_x), ctypes.byref(win_y),
+                ctypes.byref(mask)
+            )
+            sw = self._x11.XDisplayWidth(display, 0)
+            sh = self._x11.XDisplayHeight(display, 0)
+            self._x11.XCloseDisplay(display)
+
+            if res != 0:
+                return (root_x.value, root_y.value), (sw, sh)
+        except Exception:
+            pass
+        return None, None
+
+
 class HotCornerDaemon(threading.Thread):
     """
     macOS-style Hot Corner daemon.
-    Polls the virtual cursor position (tracked via evdev) every 80ms.
-    When cursor dwells in a screen corner for the configured delay, triggers the action.
-    This works reliably across X11/Wayland without needing external tools.
+    Polls real global cursor position using X11/Xwayland API every 50ms.
+    When cursor enters a corner region and dwells for config.hot_corner_delay_ms,
+    triggers the configured action.
     """
 
     def __init__(self, engine_ref):
         super().__init__(name="HotCornerDaemon", daemon=True)
         self._engine = engine_ref
+        self._tracker = X11PointerTracker()
         self._active_corner = None
         self._dwell_start = 0
         self._cooldown_until = 0
 
     def run(self):
-        log.info(f"HotCornerDaemon started (Virtual Cursor Tracking)")
+        log.info("HotCornerDaemon started (X11/Xwayland Global Pointer Query)")
 
         while self._engine.running:
-            time.sleep(0.08)  # 80ms poll interval (~12.5 Hz)
+            time.sleep(0.05)  # 50ms poll interval (20 Hz)
 
             if not config.hot_corner_enabled:
                 self._active_corner = None
                 self._dwell_start = 0
                 continue
 
-            x = self._engine._cursor_x
-            y = self._engine._cursor_y
-            sw = self._engine._screen_w
-            sh = self._engine._screen_h
-
             now = time.monotonic()
             if now < self._cooldown_until:
                 continue
 
-            sz = config.hot_corner_size
+            pos, screen = self._tracker.get_pointer_and_screen()
+            if pos and screen:
+                x, y = pos
+                sw, sh = screen
+            else:
+                x = self._engine._cursor_x
+                y = self._engine._cursor_y
+                sw = self._engine._screen_w
+                sh = self._engine._screen_h
+
+            sz = max(config.hot_corner_size, 10)
             corner = None
             if x <= sz and y <= sz:
                 corner = "top_left"
@@ -748,7 +799,6 @@ class HotCornerDaemon(threading.Thread):
 
             if corner:
                 if corner == self._active_corner:
-                    # Already triggered this corner, wait for leave
                     continue
 
                 if self._dwell_start == 0 or corner != getattr(self, '_dwell_corner', None):
@@ -760,7 +810,7 @@ class HotCornerDaemon(threading.Thread):
                     action = config.get_hot_corner_action(corner)
                     if action and action != "none":
                         actions.execute(action)
-                        log.info(f"Hot corner triggered: {corner} → {action}")
+                        log.info(f"🔥 Hot corner triggered: {corner} -> {action}")
                     self._active_corner = corner
                     self._cooldown_until = now + 1.2
                     self._dwell_start = 0

@@ -77,10 +77,10 @@ HOT_CORNER_ACTIONS = {
 DEFAULT_REMAPS = []
 
 DEFAULT_HOT_CORNERS = {
-    "top_left":     "none",
-    "top_right":    "none",
+    "top_left":     "missionControl",
+    "top_right":    "showDesktop",
     "bottom_left":  "none",
-    "bottom_right": "none",
+    "bottom_right": "appGrid",
 }
 
 
@@ -94,7 +94,7 @@ class Config:
         self.pan_sensitivity = 25
         self.pan_inertia = 65
         self.pan_invert = False
-        self.hot_corner_size = 5
+        self.hot_corner_size = 15
         self.hot_corner_enabled = True
         self.hot_corner_delay_ms = 200
         self.remaps = copy.deepcopy(DEFAULT_REMAPS)
@@ -200,7 +200,7 @@ class Config:
         self.pan_inertia = 65
         self.pan_invert = False
         self.hot_corner_enabled = True
-        self.hot_corner_size = 5
+        self.hot_corner_size = 15
         self.hot_corner_delay_ms = 200
         self.save()
 
