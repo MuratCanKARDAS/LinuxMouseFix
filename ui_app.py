@@ -377,7 +377,23 @@ class LinuxMouseFixWindow(Adw.ApplicationWindow):
     # ═══════════════ TAB 4: HOT CORNERS ═══════════════
     def _build_hot_corners_page(self):
         page = Adw.PreferencesPage()
+        
+        is_wayland = os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland" or os.environ.get("WAYLAND_DISPLAY")
+        
+        if is_wayland:
+            wg = Adw.PreferencesGroup()
+            lbl = Gtk.Label(label="⚠️ Wayland Güvenlik Kısıtlaması\nHarici uygulamaların farenin ekran üzerindeki mutlak (x, y) konumunu okuması\nLinux/Wayland mimarisi tarafından Kernel seviyesinde yasaklanmıştır.\nBu özellik devre dışı bırakılmıştır. Lütfen 'Fare Jestleri' (Tuş+Kaydırma) sistemini kullanın.")
+            lbl.set_wrap(True)
+            lbl.set_justify(Gtk.Justification.CENTER)
+            lbl.set_margin_top(10)
+            lbl.set_margin_bottom(10)
+            wg.add(lbl)
+            page.add(wg)
+            
         g = Adw.PreferencesGroup(title="Sıcak Köşeler", description="Fareyi köşeye götürünce eylem tetiklenir")
+        if is_wayland:
+            g.set_sensitive(False)
+            
         self._hc_switch = Adw.SwitchRow(title="Hot Corner Aktif")
         self._hc_switch.set_active(config.hot_corner_enabled)
         self._hc_switch.connect("notify::active", lambda r, _: (setattr(config, 'hot_corner_enabled', r.get_active()), config.save()))
@@ -396,6 +412,9 @@ class LinuxMouseFixWindow(Adw.ApplicationWindow):
         page.add(g)
 
         g2 = Adw.PreferencesGroup(title="Köşe Ayarları")
+        if is_wayland:
+            g2.set_sensitive(False)
+            
         delay = Adw.SpinRow.new_with_range(0, 1000, 50)
         delay.set_title("Gecikme (ms)")
         delay.set_value(config.hot_corner_delay_ms)
