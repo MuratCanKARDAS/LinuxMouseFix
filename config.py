@@ -126,11 +126,20 @@ class Config:
                 self.pan_sensitivity = data.get("pan_sensitivity", 25)
                 self.pan_inertia = data.get("pan_inertia", 65)
                 self.pan_invert = data.get("pan_invert", False)
-                self.hot_corner_size = data.get("hot_corner_size", 5)
+                self.hot_corner_size = data.get("hot_corner_size", 15)
+                if self.hot_corner_size < 10:
+                    self.hot_corner_size = 15
+
                 self.hot_corner_enabled = data.get("hot_corner_enabled", True)
                 self.hot_corner_delay_ms = data.get("hot_corner_delay_ms", 200)
                 self.remaps = data.get("remaps", copy.deepcopy(DEFAULT_REMAPS))
                 self.hot_corners = data.get("hot_corners", copy.deepcopy(DEFAULT_HOT_CORNERS))
+
+                # Auto-upgrade if all hot corners are set to none
+                if all(v == "none" for v in self.hot_corners.values()):
+                    self.hot_corners = copy.deepcopy(DEFAULT_HOT_CORNERS)
+                    self.save()
+
                 self.detected_device = data.get("detected_device", "")
                 self.detected_buttons = data.get("detected_buttons", [])
             except (json.JSONDecodeError, KeyError):
