@@ -12,6 +12,12 @@ import os
 import ctypes
 
 try:
+    from gi.repository import GLib
+    HAS_GLIB = True
+except Exception:
+    HAS_GLIB = False
+
+try:
     import evdev
     from evdev import ecodes, UInput, InputDevice
     HAS_EVDEV = True
@@ -275,9 +281,8 @@ class MouseEngine(threading.Thread):
         self._notify_status(True, f"Aktif — {self._mouse.name}")
         log.info(f"Engine running on {self._mouse.name}")
 
-        # Start macOS-style Hot Corner daemon
-        self._hc_thread = HotCornerDaemon(self)
-        self._hc_thread.start()
+        # Start macOS-style Hot Corners via GLib main loop
+        self._start_hot_corners()
 
         try:
             for ev in self._mouse.read_loop():
@@ -692,8 +697,81 @@ class MouseEngine(threading.Thread):
             pass
         self._notify_status(False, "Durduruldu")
 
+    def _start_hot_corners(self):
+        self._hc_tracker = X11PointerTracker()
+        self._hc_active_corner = None
+        self._hc_dwell_start = 0
+        self._hc_dwell_corner = None
+        self._hc_cooldown_until = 0
+
+        if HAS_GLIB:
+            GLib.timeout_add(50, self._hot_corner_tick)
+            log.info("Hot Corner ticker registered with GLib Main Loop (20Hz)")
+
+    def _hot_corner_tick(self):
+        if not self._running:
+            if hasattr(self, '_hc_tracker') and self._hc_tracker:
+                self._hc_tracker.close()
+            return False
+
+        if not config.hot_corner_enabled or not config.enabled:
+            self._hc_active_corner = None
+            self._hc_dwell_start = 0
+            return True
+
+        now = time.monotonic()
+        if now < self._hc_cooldown_until:
+            return True
+
+        pos, screen = self._hc_tracker.get_pointer_and_screen()
+        if pos and screen:
+            x, y = pos
+            sw, sh = screen
+        else:
+            x = self._cursor_x
+            y = self._cursor_y
+            sw = self._screen_w
+            sh = self._screen_h
+
+        sz = max(config.hot_corner_size, 10)
+        corner = None
+        if x <= sz and y <= sz:
+            corner = "top_left"
+        elif x >= sw - 1 - sz and y <= sz:
+            corner = "top_right"
+        elif x <= sz and y >= sh - 1 - sz:
+            corner = "bottom_left"
+        elif x >= sw - 1 - sz and y >= sh - 1 - sz:
+            corner = "bottom_right"
+
+        if corner:
+            if corner == self._hc_active_corner:
+                return True
+
+            if self._hc_dwell_start == 0 or corner != getattr(self, '_hc_dwell_corner', None):
+                self._hc_dwell_start = now
+                self._hc_dwell_corner = corner
+
+            elapsed_ms = (now - self._hc_dwell_start) * 1000
+            if elapsed_ms >= config.hot_corner_delay_ms:
+                action = config.get_hot_corner_action(corner)
+                if action and action != "none":
+                    actions.execute(action)
+                    log.info(f"🔥 Hot corner triggered: {corner} -> {action}")
+                self._hc_active_corner = corner
+                self._hc_cooldown_until = now + 1.2
+                self._hc_dwell_start = 0
+        else:
+            self._hc_active_corner = None
+            self._hc_dwell_start = 0
+            self._hc_dwell_corner = None
+
+        return True
+
     def stop(self):
         self._running = False
+        if hasattr(self, '_hc_tracker') and self._hc_tracker:
+            self._hc_tracker.close()
         if self._mouse:
             try:
                 self._mouse.close()
@@ -762,81 +840,6 @@ class X11PointerTracker:
             except Exception:
                 pass
         self._display = None
-
-
-class HotCornerDaemon(threading.Thread):
-    """
-    macOS-style Hot Corner daemon.
-    Polls real global cursor position using X11/Xwayland API every 50ms.
-    When cursor enters a corner region and dwells for config.hot_corner_delay_ms,
-    triggers the configured action.
-    """
-
-    def __init__(self, engine_ref):
-        super().__init__(name="HotCornerDaemon", daemon=True)
-        self._engine = engine_ref
-        self._tracker = X11PointerTracker()
-        self._active_corner = None
-        self._dwell_start = 0
-        self._cooldown_until = 0
-
-    def run(self):
-        log.info("HotCornerDaemon started (X11/Xwayland Global Pointer Query)")
-
-        while self._engine.running:
-            time.sleep(0.05)  # 50ms poll interval (20 Hz)
-
-            if not config.hot_corner_enabled:
-                self._active_corner = None
-                self._dwell_start = 0
-                continue
-
-            now = time.monotonic()
-            if now < self._cooldown_until:
-                continue
-
-            pos, screen = self._tracker.get_pointer_and_screen()
-            if pos and screen:
-                x, y = pos
-                sw, sh = screen
-            else:
-                x = self._engine._cursor_x
-                y = self._engine._cursor_y
-                sw = self._engine._screen_w
-                sh = self._engine._screen_h
-
-            sz = max(config.hot_corner_size, 10)
-            corner = None
-            if x <= sz and y <= sz:
-                corner = "top_left"
-            elif x >= sw - 1 - sz and y <= sz:
-                corner = "top_right"
-            elif x <= sz and y >= sh - 1 - sz:
-                corner = "bottom_left"
-            elif x >= sw - 1 - sz and y >= sh - 1 - sz:
-                corner = "bottom_right"
-
-            if corner:
-                if corner == self._active_corner:
-                    continue
-
-                if self._dwell_start == 0 or corner != getattr(self, '_dwell_corner', None):
-                    self._dwell_start = now
-                    self._dwell_corner = corner
-
-                elapsed_ms = (now - self._dwell_start) * 1000
-                if elapsed_ms >= config.hot_corner_delay_ms:
-                    action = config.get_hot_corner_action(corner)
-                    if action and action != "none":
-                        actions.execute(action)
-                        log.info(f"🔥 Hot corner triggered: {corner} -> {action}")
-                    self._active_corner = corner
-                    self._cooldown_until = now + 1.2
-                    self._dwell_start = 0
-            else:
-                self._active_corner = None
-                self._dwell_start = 0
-                self._dwell_corner = None
 
 
 engine = MouseEngine()
