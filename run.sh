@@ -13,7 +13,7 @@ echo "🚀 Linux Mouse Fix Başlatılıyor..."
 if [ "$EUID" -ne 0 ]; then
     echo "⚠️ UYARI: Donanım seviyesinde fare dinleme için root (sudo) yetkisi gereklidir."
     echo "Sudo yetkisi ile başlatılıyor..."
-    sudo python3 "$SCRIPT_DIR/main.py" "$@"
+    sudo -E DISPLAY="${DISPLAY:-:0}" XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}" python3 "$SCRIPT_DIR/main.py" "$@"
 else
     python3 "$SCRIPT_DIR/main.py" "$@"
 fi

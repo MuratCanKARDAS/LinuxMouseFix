@@ -703,6 +703,7 @@ class MouseEngine(threading.Thread):
         self._hc_dwell_start = 0
         self._hc_dwell_corner = None
         self._hc_cooldown_until = 0
+        self._hc_last_log_time = 0
 
         if HAS_GLIB:
             GLib.timeout_add(50, self._hot_corner_tick)
@@ -727,11 +728,18 @@ class MouseEngine(threading.Thread):
         if pos and screen:
             x, y = pos
             sw, sh = screen
+            source = "X11"
         else:
             x = self._cursor_x
             y = self._cursor_y
             sw = self._screen_w
             sh = self._screen_h
+            source = "EVDEV_FALLBACK"
+
+        # Log status every 3 seconds for diagnostics
+        if now - self._hc_last_log_time >= 3.0:
+            self._hc_last_log_time = now
+            log.info(f"📍 [HotCorner] Tracking ({source}): Cursor=({x}, {y}), Screen={sw}x{sh}, Enabled={config.hot_corner_enabled}, Size={config.hot_corner_size}px, Delay={config.hot_corner_delay_ms}ms")
 
         sz = max(config.hot_corner_size, 10)
         corner = None
@@ -751,17 +759,24 @@ class MouseEngine(threading.Thread):
             if self._hc_dwell_start == 0 or corner != getattr(self, '_hc_dwell_corner', None):
                 self._hc_dwell_start = now
                 self._hc_dwell_corner = corner
+                log.info(f"🎯 [HotCorner] Cursor entered '{corner}' at ({x}, {y}) (Size threshold: {sz}px)")
 
             elapsed_ms = (now - self._hc_dwell_start) * 1000
+            log.info(f"⏳ [HotCorner] Dwelling in '{corner}': {elapsed_ms:.0f}ms / {config.hot_corner_delay_ms}ms")
+
             if elapsed_ms >= config.hot_corner_delay_ms:
                 action = config.get_hot_corner_action(corner)
                 if action and action != "none":
                     actions.execute(action)
-                    log.info(f"🔥 Hot corner triggered: {corner} -> {action}")
+                    log.info(f"🔥 [HotCorner] TRIGGERED! '{corner}' -> '{action}'")
+                else:
+                    log.warning(f"⚠️ [HotCorner] '{corner}' reached delay but no action assigned ('none')")
                 self._hc_active_corner = corner
                 self._hc_cooldown_until = now + 1.2
                 self._hc_dwell_start = 0
         else:
+            if getattr(self, '_hc_dwell_corner', None) is not None:
+                log.info(f"↩️ [HotCorner] Cursor left corner '{self._hc_dwell_corner}'")
             self._hc_active_corner = None
             self._hc_dwell_start = 0
             self._hc_dwell_corner = None
@@ -783,6 +798,7 @@ class X11PointerTracker:
     def __init__(self):
         self._x11 = None
         self._display = None
+        self._failed_attempts = 0
         try:
             self._x11 = ctypes.cdll.LoadLibrary("libX11.so.6")
             if hasattr(self._x11, "XInitThreads"):
@@ -796,14 +812,22 @@ class X11PointerTracker:
         if not self._x11:
             return False
         try:
-            disp_name = os.environ.get("DISPLAY", ":0").encode()
-            self._display = self._x11.XOpenDisplay(disp_name)
+            disp = os.environ.get("DISPLAY", ":0").encode()
+            self._display = self._x11.XOpenDisplay(disp)
             if not self._display:
                 self._display = self._x11.XOpenDisplay(b":0")
             if not self._display:
                 self._display = self._x11.XOpenDisplay(b":1")
-        except Exception:
+
+            if self._display:
+                log.info("✅ [X11PointerTracker] Connected to X11 Display successfully.")
+            else:
+                if self._failed_attempts % 100 == 0:
+                    log.warning(f"⚠️ [X11PointerTracker] Failed to open X11 display (DISPLAY={os.environ.get('DISPLAY')})")
+                self._failed_attempts += 1
+        except Exception as e:
             self._display = None
+            log.error(f"X11 connection error: {e}")
         return self._display is not None
 
     def get_pointer_and_screen(self):
