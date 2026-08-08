@@ -704,6 +704,11 @@ class MouseEngine(threading.Thread):
         self._hc_dwell_corner = None
         self._hc_cooldown_until = 0
         self._hc_last_log_time = 0
+        self._hc_x11_last_pos = None
+        self._hc_x11_stuck_count = 0
+        self._hc_force_evdev = False
+        self._hc_last_evdev_x = self._cursor_x
+        self._hc_last_evdev_y = self._cursor_y
 
         if HAS_GLIB:
             GLib.timeout_add(50, self._hot_corner_tick)
@@ -725,7 +730,24 @@ class MouseEngine(threading.Thread):
             return True
 
         pos, screen = self._hc_tracker.get_pointer_and_screen()
-        if pos and screen:
+        source = "EVDEV_FALLBACK"
+
+        # Detect Xwayland frozen pointer (X11 cursor stuck while hardware mouse moves)
+        if pos and screen and not self._hc_force_evdev:
+            evdev_moved = (self._cursor_x != self._hc_last_evdev_x or self._cursor_y != self._hc_last_evdev_y)
+            if pos == self._hc_x11_last_pos and evdev_moved:
+                self._hc_x11_stuck_count += 1
+                if self._hc_x11_stuck_count > 10:  # 500ms stuck
+                    log.warning("⚠️ [HotCorner] X11 Pointer is FROZEN (Xwayland issue). Switching to pure EVDEV fallback!")
+                    self._hc_force_evdev = True
+            elif pos != self._hc_x11_last_pos:
+                self._hc_x11_stuck_count = 0
+
+            self._hc_x11_last_pos = pos
+            self._hc_last_evdev_x = self._cursor_x
+            self._hc_last_evdev_y = self._cursor_y
+
+        if pos and screen and not self._hc_force_evdev:
             x, y = pos
             sw, sh = screen
             source = "X11"
