@@ -159,6 +159,7 @@ class MouseEngine(threading.Thread):
         super().__init__(name="MouseEngine")
         self.daemon = True
         self._running = False
+        self._thread_active = False
         self._mouse = None
         self._ui = None
 
@@ -216,86 +217,95 @@ class MouseEngine(threading.Thread):
             self._notify_status(False, perm_msg)
             return
 
-        dev, detected_btns, caps = detect_mouse_device()
-        if dev:
+        self._thread_active = True
+
+        while self._thread_active:
+            dev, detected_btns, caps = detect_mouse_device()
+            if not dev:
+                self._notify_status(False, "Fare bağlantısı bekleniyor (Uyku modu / Bağlı değil)...")
+                time.sleep(3)
+                continue
+
             self._notify_device_info(dev.name, detected_btns, caps)
             config.detected_device = dev.name
             config.detected_buttons = detected_btns
             config.save()
             self._mouse = dev
-        else:
-            self._notify_status(False, "Mouse cihazı bulunamadı (Touchpad göz ardı edildi)")
-            return
 
-        self._screen_w, self._screen_h = get_screen_size()
-        self._cursor_x = self._screen_w // 2
-        self._cursor_y = self._screen_h // 2
+            self._screen_w, self._screen_h = get_screen_size()
+            self._cursor_x = self._screen_w // 2
+            self._cursor_y = self._screen_h // 2
 
-        cap = {
-            ecodes.EV_REL: [
-                ecodes.REL_X, ecodes.REL_Y,
-                ecodes.REL_WHEEL, ecodes.REL_HWHEEL,
-            ],
-            ecodes.EV_KEY: [
-                ecodes.BTN_LEFT, ecodes.BTN_RIGHT, ecodes.BTN_MIDDLE,
-                ecodes.BTN_SIDE, ecodes.BTN_EXTRA,
-                ecodes.KEY_LEFTALT, ecodes.KEY_LEFTCTRL,
-                ecodes.KEY_LEFTMETA, ecodes.KEY_LEFTSHIFT,
-                ecodes.KEY_LEFT, ecodes.KEY_RIGHT,
-                ecodes.KEY_UP, ecodes.KEY_DOWN,
-                ecodes.KEY_EQUAL, ecodes.KEY_MINUS, ecodes.KEY_0,
-                ecodes.KEY_KPPLUS, ecodes.KEY_KPMINUS,
-                ecodes.KEY_A, ecodes.KEY_D, ecodes.KEY_H,
-                ecodes.KEY_W, ecodes.KEY_C, ecodes.KEY_V, ecodes.KEY_Z,
-                ecodes.KEY_F4, ecodes.KEY_TAB,
-                ecodes.KEY_VOLUMEUP, ecodes.KEY_VOLUMEDOWN,
-                ecodes.KEY_PLAYPAUSE, ecodes.KEY_NEXTSONG, ecodes.KEY_PREVIOUSSONG,
-                ecodes.KEY_SYSRQ,
-            ],
-        }
+            cap = {
+                ecodes.EV_REL: [
+                    ecodes.REL_X, ecodes.REL_Y,
+                    ecodes.REL_WHEEL, ecodes.REL_HWHEEL,
+                ],
+                ecodes.EV_KEY: [
+                    ecodes.BTN_LEFT, ecodes.BTN_RIGHT, ecodes.BTN_MIDDLE,
+                    ecodes.BTN_SIDE, ecodes.BTN_EXTRA,
+                    ecodes.KEY_LEFTALT, ecodes.KEY_LEFTCTRL,
+                    ecodes.KEY_LEFTMETA, ecodes.KEY_LEFTSHIFT,
+                    ecodes.KEY_LEFT, ecodes.KEY_RIGHT,
+                    ecodes.KEY_UP, ecodes.KEY_DOWN,
+                    ecodes.KEY_EQUAL, ecodes.KEY_MINUS, ecodes.KEY_0,
+                    ecodes.KEY_KPPLUS, ecodes.KEY_KPMINUS,
+                    ecodes.KEY_A, ecodes.KEY_D, ecodes.KEY_H,
+                    ecodes.KEY_W, ecodes.KEY_C, ecodes.KEY_V, ecodes.KEY_Z,
+                    ecodes.KEY_F4, ecodes.KEY_TAB,
+                    ecodes.KEY_VOLUMEUP, ecodes.KEY_VOLUMEDOWN,
+                    ecodes.KEY_PLAYPAUSE, ecodes.KEY_NEXTSONG, ecodes.KEY_PREVIOUSSONG,
+                    ecodes.KEY_SYSRQ,
+                ],
+            }
 
-        try:
-            if hasattr(ecodes, 'REL_WHEEL_HI_RES'):
-                cap[ecodes.EV_REL].append(ecodes.REL_WHEEL_HI_RES)
-            if hasattr(ecodes, 'REL_HWHEEL_HI_RES'):
-                cap[ecodes.EV_REL].append(ecodes.REL_HWHEEL_HI_RES)
-        except AttributeError:
-            pass
+            try:
+                if hasattr(ecodes, 'REL_WHEEL_HI_RES'):
+                    cap[ecodes.EV_REL].append(ecodes.REL_WHEEL_HI_RES)
+                if hasattr(ecodes, 'REL_HWHEEL_HI_RES'):
+                    cap[ecodes.EV_REL].append(ecodes.REL_HWHEEL_HI_RES)
+            except AttributeError:
+                pass
 
-        try:
-            self._ui = UInput(cap, name="LinuxMouseFix-Virtual", version=0x6)
-        except Exception as e:
-            self._notify_status(False, f"UInput hatası: {e}")
-            return
+            try:
+                self._ui = UInput(cap, name="LinuxMouseFix-Virtual", version=0x6)
+            except Exception as e:
+                self._notify_status(False, f"UInput hatası: {e}")
+                time.sleep(3)
+                continue
 
-        actions.set_uinput(self._ui)
+            actions.set_uinput(self._ui)
 
-        try:
-            self._mouse.grab()
-        except Exception as e:
-            self._notify_status(False, f"Mouse yakalanamadı: {e}")
-            self._ui.close()
-            return
+            try:
+                self._mouse.grab()
+            except Exception as e:
+                self._notify_status(False, f"Fareye erişilemedi: {e}")
+                self._ui.close()
+                time.sleep(3)
+                continue
 
-        self._running = True
-        self._notify_status(True, f"Aktif — {self._mouse.name}")
-        log.info(f"Engine running on {self._mouse.name}")
+            self._running = True
+            self._notify_status(True, f"Aktif — {self._mouse.name}")
+            log.info(f"Engine running on {self._mouse.name}")
 
-        # Start macOS-style Hot Corners via GLib main loop
-        self._start_hot_corners()
+            # Start macOS-style Hot Corners via GLib main loop
+            self._start_hot_corners()
 
-        try:
-            for ev in self._mouse.read_loop():
-                if not self._running:
-                    break
-                self._process_event(ev)
-        except OSError as e:
-            if self._running:
-                self._notify_status(False, f"Cihaz koptu: {e}")
-        except Exception as e:
-            log.error(f"Loop error: {e}")
-        finally:
-            self._cleanup()
+            try:
+                for ev in self._mouse.read_loop():
+                    if not self._running or not self._thread_active:
+                        break
+                    self._process_event(ev)
+            except OSError as e:
+                if self._thread_active:
+                    self._notify_status(False, "Fare bağlantısı koptu. Yeniden aranıyor...")
+                    log.warning(f"Device disconnected: {e}. Entering reconnect loop.")
+            except Exception as e:
+                log.error(f"Loop error: {e}")
+            finally:
+                self._cleanup()
+                if self._thread_active:
+                    time.sleep(2)
 
     def _process_event(self, ev):
         if not config.enabled:
@@ -342,7 +352,7 @@ class MouseEngine(threading.Thread):
                 curr_vx *= friction
                 curr_vy *= friction
 
-                if abs(curr_vx) < 10 and abs(curr_vy) < 10:
+                if abs(curr_vx) < 0.5 and abs(curr_vy) < 0.5:
                     break
 
                 sens = max(1, config.pan_sensitivity)
@@ -811,7 +821,9 @@ class MouseEngine(threading.Thread):
         return True
 
     def stop(self):
+        self._thread_active = False
         self._running = False
+        self._cleanup()
         if hasattr(self, '_hc_tracker') and self._hc_tracker:
             self._hc_tracker.close()
         if self._mouse:

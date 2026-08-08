@@ -1,42 +1,39 @@
 #!/bin/bash
-# Linux Mouse Fix - Permission Setup Script
-# Configures udev rules so LinuxMouseFix can access /dev/input/event* and /dev/uinput
-# without needing root/sudo every time.
+# Linux Mouse Fix - Yetkilendirme Scripti
+# Bu script, uygulamanın "sudo" olmadan normal kullanıcı olarak çalışabilmesi için
+# gerekli /dev/input ve /dev/uinput izinlerini ayarlar.
 
-set -e
-
-echo "=== LinuxMouseFix İzin Yapılandırması ==="
-
-# 1. Ensure uinput kernel module is loaded
-modprobe uinput 2>/dev/null || true
-if ! grep -q "^uinput" /etc/modules-load.d/uinput.conf 2>/dev/null; then
-    echo "uinput" >> /etc/modules-load.d/uinput.conf 2>/dev/null || true
+if [ "$EUID" -ne 0 ]; then
+  echo "HATA: Lütfen bu scripti sudo ile çalıştırın!"
+  echo "Kullanım: sudo ./setup_permissions.sh"
+  exit 1
 fi
 
-# 2. Add udev rule for uinput and input event devices
-UDEV_RULE_FILE="/etc/udev/rules.d/99-linuxmousefix.rules"
+# Sudo komutunu çalıştıran asıl kullanıcıyı bul
+ACTUAL_USER=${SUDO_USER:-$USER}
 
-cat << 'EOF' > "$UDEV_RULE_FILE"
-# LinuxMouseFix permissions
-KERNEL=="uinput", MODE="0666", OPTIONS+="static_node=uinput"
-KERNEL=="event*", SUBSYSTEM=="input", MODE="0666"
+echo "🔄 1. Kullanıcı '$ACTUAL_USER' 'input' grubuna ekleniyor..."
+usermod -aG input "$ACTUAL_USER"
+
+echo "📝 2. udev kuralları oluşturuluyor (/etc/udev/rules.d/99-linuxmousefix.rules)..."
+cat << 'EOF' > /etc/udev/rules.d/99-linuxmousefix.rules
+# Linux Mouse Fix - Donanım İzin Kuralları
+
+# Fare ve klavye donanımlarını okuma yetkisi
+SUBSYSTEM=="input", GROUP="input", MODE="0660"
+
+# Sanal fare/klavye cihazı (uinput) yaratma yetkisi
+KERNEL=="uinput", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"
 EOF
 
-echo "✅ udev kuralı oluşturuldu: $UDEV_RULE_FILE"
+echo "⚡ 3. Sistem udev kuralları yeniden yükleniyor..."
+udevadm control --reload-rules
+udevadm trigger
 
-# 3. Reload udev rules and trigger
-udevadm control --reload-rules 2>/dev/null || true
-udevadm trigger 2>/dev/null || true
-
-# 4. Set current runtime permissions immediately
-chmod 666 /dev/uinput 2>/dev/null || true
-chmod 666 /dev/input/event* 2>/dev/null || true
-
-# 5. Add user to input group if user specified
-TARGET_USER="${SUDO_USER:-$1}"
-if [ -n "$TARGET_USER" ] && id "$TARGET_USER" &>/dev/null; then
-    usermod -aG input "$TARGET_USER" 2>/dev/null || true
-    echo "✅ Kullanıcı '$TARGET_USER' input grubuna eklendi."
-fi
-
-echo "=== İzinler Başarıyla Yapılandırıldı ==="
+echo ""
+echo "✅ BAŞARILI: Donanım erişim izinleri sisteme tanımlandı."
+echo "========================================================================="
+echo "⚠️  KRİTİK UYARI: İşletim sisteminin sizi 'input' grubuna dahil edebilmesi"
+echo "için BİLGİSAYARI YENİDEN BAŞLATMANIZ veya OTURUMU KAPATIP AÇMANIZ ŞARTTIR."
+echo "========================================================================="
+echo "Yeniden başlattıktan sonra programı sadece './run.sh' (sudo olmadan) çalıştırabilirsiniz!"

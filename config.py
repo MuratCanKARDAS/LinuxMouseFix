@@ -166,7 +166,30 @@ class Config:
         }
         with open(CONFIG_FILE, "w") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
+        self._update_autostart_desktop()
         self._notify()
+
+    def _update_autostart_desktop(self):
+        autostart_dir = os.path.expanduser("~/.config/autostart")
+        desktop_file = os.path.join(autostart_dir, "linuxmousefix.desktop")
+        
+        if self.autostart:
+            os.makedirs(autostart_dir, exist_ok=True)
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            run_script = os.path.join(current_dir, "run.sh")
+            
+            content = f"[Desktop Entry]\nType=Application\nExec={run_script}\nHidden=false\nNoDisplay=false\nX-GNOME-Autostart-enabled=true\nName=Linux Mouse Fix\nComment=Mac-like gestures for Linux\nIcon=input-mouse\n"
+            try:
+                with open(desktop_file, "w") as f:
+                    f.write(content)
+            except Exception:
+                pass
+        else:
+            if os.path.exists(desktop_file):
+                try:
+                    os.remove(desktop_file)
+                except Exception:
+                    pass
 
     def add_remap(self, button, trigger, action):
         for r in self.remaps:
