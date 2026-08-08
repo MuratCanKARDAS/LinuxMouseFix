@@ -380,6 +380,14 @@ class LinuxMouseFixWindow(Adw.ApplicationWindow):
         pan_sens_row.connect("notify::value", lambda r, _: (setattr(config, 'pan_sensitivity', int(r.get_value())), config.save()))
         g.add(pan_sens_row)
 
+        # Pan Inertia / Momentum Duration (0 to 100)
+        pan_ine_row = Adw.SpinRow.new_with_range(0, 100, 5)
+        pan_ine_row.set_title("Ataletli Yumuşak Süzülme (Momentum Glide)")
+        pan_ine_row.set_subtitle("0 = Anında Dur, 50 = Standart, 70-100 = Uzun ve Akıcı Süzülme")
+        pan_ine_row.set_value(config.pan_inertia)
+        pan_ine_row.connect("notify::value", lambda r, _: (setattr(config, 'pan_inertia', int(r.get_value())), config.save()))
+        g.add(pan_ine_row)
+
         # Pan Invert
         pan_inv_row = Adw.SwitchRow(title="Pan Yönünü Tersine Çevir (Natural Pan)")
         pan_inv_row.set_subtitle("Fareyi aşağı çekince sayfayı yukarı kaydırır")

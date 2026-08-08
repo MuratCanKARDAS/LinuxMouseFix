@@ -92,6 +92,7 @@ class Config:
         self.autostart = False
         self.drag_threshold = 40
         self.pan_sensitivity = 25
+        self.pan_inertia = 65
         self.pan_invert = False
         self.hot_corner_size = 5
         self.hot_corner_enabled = True
@@ -123,6 +124,7 @@ class Config:
                 self.autostart = data.get("autostart", False)
                 self.drag_threshold = data.get("drag_threshold", 40)
                 self.pan_sensitivity = data.get("pan_sensitivity", 25)
+                self.pan_inertia = data.get("pan_inertia", 65)
                 self.pan_invert = data.get("pan_invert", False)
                 self.hot_corner_size = data.get("hot_corner_size", 5)
                 self.hot_corner_enabled = data.get("hot_corner_enabled", True)
@@ -143,6 +145,7 @@ class Config:
             "autostart": self.autostart,
             "drag_threshold": self.drag_threshold,
             "pan_sensitivity": self.pan_sensitivity,
+            "pan_inertia": self.pan_inertia,
             "pan_invert": self.pan_invert,
             "hot_corner_size": self.hot_corner_size,
             "hot_corner_enabled": self.hot_corner_enabled,
@@ -194,6 +197,7 @@ class Config:
         self.enabled = True
         self.drag_threshold = 40
         self.pan_sensitivity = 25
+        self.pan_inertia = 65
         self.pan_invert = False
         self.hot_corner_enabled = True
         self.hot_corner_size = 5

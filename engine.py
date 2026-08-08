@@ -309,11 +309,18 @@ class MouseEngine(threading.Thread):
         self._inertia_active = True
 
         def inertia_loop():
-            # Initial momentum velocity scaling
-            curr_vx = vx * 0.40
-            curr_vy = vy * 0.40
+            inertia_val = getattr(config, "pan_inertia", 65)
+            if inertia_val <= 0:
+                self._inertia_active = False
+                return
 
-            friction = 0.945  # Decay factor per 8ms frame for ultra-smooth 125Hz glide
+            # Dynamic velocity boost (0.25 to 0.75) based on inertia setting
+            v_factor = 0.25 + (inertia_val / 100.0) * 0.50
+            curr_vx = vx * v_factor
+            curr_vy = vy * v_factor
+
+            # Dynamic decay factor per 8ms frame (0.86 to 0.985)
+            friction = 0.86 + (inertia_val / 100.0) * 0.125
             dt = 0.008
 
             hi_res_accum_x = 0.0
