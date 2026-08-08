@@ -446,6 +446,8 @@ class MouseEngine(threading.Thread):
             self._pressed_buttons[btn] = {
                 "dx": 0, "dy": 0,
                 "pan_x": 0, "pan_y": 0,
+                "hi_res_y": 0.0, "hi_res_x": 0.0,
+                "wheel_y": 0.0, "wheel_x": 0.0,
                 "samples": [],
                 "triggered": False,
                 "evcode": ev.code,
@@ -584,35 +586,58 @@ class MouseEngine(threading.Thread):
                     state["hold_timer"] = None
 
             if is_pan:
-                # pan_sensitivity: pixels per full scroll notch (range 5 to 100)
+                # Pan_sensitivity (sens): Physical pixels required to trigger 1 full legacy scroll notch (120 hi-res units)
+                # This means 1 physical pixel = (120 / sens) hi-res units.
                 sens = max(1, config.pan_sensitivity)
                 inv = -1 if config.pan_invert else 1
+                
+                multiplier = 120.0 / sens
 
-                # Vertical scroll (REL_WHEEL + REL_WHEEL_HI_RES)
-                if abs(state["pan_y"]) >= sens:
-                    steps = int(state["pan_y"] / sens)
-                    direction = -steps * inv
-
-                    self._ui.write(ecodes.EV_REL, ecodes.REL_WHEEL, direction)
+                # Vertical scroll
+                if ev.code == ecodes.REL_Y:
+                    hi_res_delta = ev.value * multiplier * inv
+                    state["hi_res_y"] += hi_res_delta
+                    state["wheel_y"] += hi_res_delta
+                    
                     if hasattr(ecodes, 'REL_WHEEL_HI_RES'):
-                        self._ui.write(ecodes.EV_REL, ecodes.REL_WHEEL_HI_RES, direction * 120)
-                    self._ui.syn()
+                        # Emit high-res event per physical pixel!
+                        if abs(state["hi_res_y"]) >= 1.0:
+                            hi_res_int = int(state["hi_res_y"])
+                            self._ui.write(ecodes.EV_REL, ecodes.REL_WHEEL_HI_RES, hi_res_int)
+                            state["hi_res_y"] -= hi_res_int
+                            self._ui.syn()
+                            state["triggered"] = True
 
-                    state["pan_y"] -= steps * sens
-                    state["triggered"] = True
+                    # Emit legacy REL_WHEEL when it accumulates to a full notch (120 units)
+                    if abs(state["wheel_y"]) >= 120.0:
+                        wheel_int = int(state["wheel_y"] / 120.0)
+                        self._ui.write(ecodes.EV_REL, ecodes.REL_WHEEL, wheel_int)
+                        state["wheel_y"] -= wheel_int * 120.0
+                        self._ui.syn()
+                        state["triggered"] = True
 
-                # Horizontal scroll (REL_HWHEEL + REL_HWHEEL_HI_RES)
-                if abs(state["pan_x"]) >= sens:
-                    steps = int(state["pan_x"] / sens)
-                    direction = steps * inv
+                # Horizontal scroll
+                if ev.code == ecodes.REL_X:
+                    # X axis needs opposite direction for REL_HWHEEL in Linux generally, 
+                    # but let's keep consistent with our `inv` logic. (Left movement = negative value)
+                    hi_res_delta = ev.value * multiplier * inv * -1
+                    state["hi_res_x"] += hi_res_delta
+                    state["wheel_x"] += hi_res_delta
 
-                    self._ui.write(ecodes.EV_REL, ecodes.REL_HWHEEL, direction)
                     if hasattr(ecodes, 'REL_HWHEEL_HI_RES'):
-                        self._ui.write(ecodes.EV_REL, ecodes.REL_HWHEEL_HI_RES, direction * 120)
-                    self._ui.syn()
+                        if abs(state["hi_res_x"]) >= 1.0:
+                            hi_res_int = int(state["hi_res_x"])
+                            self._ui.write(ecodes.EV_REL, ecodes.REL_HWHEEL_HI_RES, hi_res_int)
+                            state["hi_res_x"] -= hi_res_int
+                            self._ui.syn()
+                            state["triggered"] = True
 
-                    state["pan_x"] -= steps * sens
-                    state["triggered"] = True
+                    if abs(state["wheel_x"]) >= 120.0:
+                        wheel_int = int(state["wheel_x"] / 120.0)
+                        self._ui.write(ecodes.EV_REL, ecodes.REL_HWHEEL, wheel_int)
+                        state["wheel_x"] -= wheel_int * 120.0
+                        self._ui.syn()
+                        state["triggered"] = True
 
                 # PointerFreeze: consume cursor movement
                 return
