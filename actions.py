@@ -38,13 +38,20 @@ class ActionExecutor:
     def _press_keys(self, *keys, delay=0.015):
         if not self.ui:
             return
+        
+        # Press keys sequentially (modifiers first)
         for key in keys:
             self.ui.write(ecodes.EV_KEY, key, 1)
-        self.ui.syn()
+            self.ui.syn()
+            time.sleep(0.01) # Small delay to ensure GNOME registers modifier before alphanumeric
+            
         time.sleep(delay)
+        
+        # Release keys in reverse order
         for key in reversed(keys):
             self.ui.write(ecodes.EV_KEY, key, 0)
-        self.ui.syn()
+            self.ui.syn()
+            time.sleep(0.01)
 
     def stop_mac_zoom(self):
         pass
